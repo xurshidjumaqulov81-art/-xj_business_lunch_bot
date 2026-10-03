@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 
 from database.db import get_user_by_telegram_id
 from keyboards.main_menu import (
@@ -25,7 +26,10 @@ from services.texts import (
 router = Router()
 
 
-async def show_main_menu(message: Message, telegram_id: int):
+async def show_main_menu(message: Message, telegram_id: int, state: FSMContext | None = None):
+    if state is not None:
+        await state.clear()
+
     user = await get_user_by_telegram_id(telegram_id)
     name = user.full_name if user else "иштирокчи"
 
@@ -37,13 +41,14 @@ async def show_main_menu(message: Message, telegram_id: int):
 
 
 @router.callback_query(F.data == "main_menu")
-async def main_menu_callback(callback: CallbackQuery):
+async def main_menu_callback(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await show_main_menu(callback.message, callback.from_user.id)
+    await show_main_menu(callback.message, callback.from_user.id, state)
 
 
 @router.message(F.text == "🏆 Business Launch ҳақида маълумот")
-async def business_launch(message: Message):
+async def business_launch(message: Message, state: FSMContext):
+    await state.clear()
     await send_section(
         message,
         "business_launch",
@@ -53,7 +58,8 @@ async def business_launch(message: Message):
 
 
 @router.message(F.text == "👤 Founder Day ҳақида маълумот")
-async def founder_day(message: Message):
+async def founder_day(message: Message, state: FSMContext):
+    await state.clear()
     await send_section(
         message,
         "founder_day",
@@ -63,7 +69,8 @@ async def founder_day(message: Message):
 
 
 @router.message(F.text == "🍽 Founder Lunch ҳақида маълумот")
-async def founder_lunch(message: Message):
+async def founder_lunch(message: Message, state: FSMContext):
+    await state.clear()
     await send_section(
         message,
         "founder_lunch",
@@ -73,7 +80,8 @@ async def founder_lunch(message: Message):
 
 
 @router.message(F.text == "📋 Қатнашиш шартлари ҳақида маълумот")
-async def conditions(message: Message):
+async def conditions(message: Message, state: FSMContext):
+    await state.clear()
     await send_section(
         message,
         "conditions",
@@ -83,7 +91,8 @@ async def conditions(message: Message):
 
 
 @router.message(F.text == "🎁 Махсус танлов ҳақида маълумот")
-async def contest_info(message: Message):
+async def contest_info(message: Message, state: FSMContext):
+    await state.clear()
     await send_section(
         message,
         "contest_info",
@@ -93,7 +102,8 @@ async def contest_info(message: Message):
 
 
 @router.message(F.text == "❓ Савол-жавоб")
-async def faq(message: Message):
+async def faq(message: Message, state: FSMContext):
+    await state.clear()
     await send_section(
         message,
         "faq",
@@ -103,8 +113,9 @@ async def faq(message: Message):
 
 
 @router.callback_query(F.data == "conditions")
-async def conditions_cb(callback: CallbackQuery):
+async def conditions_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     await send_section(
         callback.message,
         "conditions",
@@ -114,8 +125,9 @@ async def conditions_cb(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "contest_info")
-async def contest_info_cb(callback: CallbackQuery):
+async def contest_info_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     await send_section(
         callback.message,
         "contest_info",
