@@ -7,6 +7,7 @@ from database.db import get_user_by_telegram_id, save_contest_application
 from keyboards.main_menu import back_to_menu_inline
 from services.notifications import notify_admins_application
 from services.texts import CONTEST_START
+from services.media import send_section
 
 router = Router()
 
@@ -27,7 +28,13 @@ async def begin_contest(message: Message, state: FSMContext, telegram_id: int):
 
     await state.clear()
     await state.set_state(ContestStates.about)
-    await message.answer(CONTEST_START, parse_mode="HTML")
+
+    # 6-расм: Maxsus tanlovga qatnashish
+    await send_section(
+        message,
+        "contest_apply",
+        CONTEST_START,
+    )
 
 
 @router.message(F.text == "✍️ Махсус танловга қатнашиш")
