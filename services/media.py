@@ -19,20 +19,28 @@ SECTION_IMAGES = {
 
 
 async def send_section(message, section: str, text: str, reply_markup=None):
-    """
-    Агар мос расм бор бўлса, аввал расмни алоҳида юборади.
-    Кейин матн ва тугмаларни алоҳида юборади.
-
-    Бу усул Telegram caption лимитига урилиб қолишни олдини олади.
-    """
     path = SECTION_IMAGES.get(section)
 
+    # Қисқа матнлар:
+    # расм + матн + тугмалар бир хабарда чиқади
     if path and path.exists():
-        await message.answer_photo(photo=FSInputFile(path))
+        if len(text) <= 1000:
+            await message.answer_photo(
+                photo=FSInputFile(path),
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+            return
+
+        # Узун матнлар, масалан FAQ:
+        # аввал расм, кейин матн
+        await message.answer_photo(
+            photo=FSInputFile(path)
+        )
 
     await message.answer(
         text,
         reply_markup=reply_markup,
         parse_mode="HTML",
     )
-
