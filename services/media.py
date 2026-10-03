@@ -12,6 +12,7 @@ SECTION_IMAGES = {
     "founder_lunch": ASSETS_DIR / "founder_lunch.jpg",
     "conditions": ASSETS_DIR / "conditions.jpg",
     "contest_info": ASSETS_DIR / "contest.jpg",
+    "contest_apply": ASSETS_DIR / "contest_apply.jpg",
     "registration": ASSETS_DIR / "registration.jpg",
     "faq": ASSETS_DIR / "faq.jpg",
 }
@@ -19,21 +20,19 @@ SECTION_IMAGES = {
 
 async def send_section(message, section: str, text: str, reply_markup=None):
     """
-    Агар assets ичида мос JPG файл бўлса — расм + caption юборилади.
-    Агар расм ҳали тайёр бўлмаса — оддий матн юборилади.
+    Агар мос расм бор бўлса, аввал расмни алоҳида юборади.
+    Кейин матн ва тугмаларни алоҳида юборади.
+
+    Бу усул Telegram caption лимитига урилиб қолишни олдини олади.
     """
     path = SECTION_IMAGES.get(section)
+
     if path and path.exists():
-        await message.answer_photo(
-            photo=FSInputFile(path),
-            caption=text,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-        )
-    else:
-        await message.answer(
-            text,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-        )
+        await message.answer_photo(photo=FSInputFile(path))
+
+    await message.answer(
+        text,
+        reply_markup=reply_markup,
+        parse_mode="HTML",
+    )
 
