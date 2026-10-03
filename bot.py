@@ -24,12 +24,15 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Admin router first so admin FSM callbacks/messages have priority
+    # Admin ва start биринчи.
     dp.include_router(admin_router)
     dp.include_router(start_router)
-    dp.include_router(contest_router)
-    dp.include_router(registration_router)
+
+    # Меню contest FSM'дан ОЛДИН туриши керак.
+    # Шунда "Савол-жавоб" каби меню тугмалари анкета жавоби сифатида ушланмайди.
     dp.include_router(menu_router)
+    dp.include_router(registration_router)
+    dp.include_router(contest_router)
 
     await bot.delete_webhook(drop_pending_updates=False)
     await dp.start_polling(bot)
