@@ -1,3 +1,4 @@
+import asyncio
 from html import escape
 
 from aiogram import Router, F
@@ -10,6 +11,8 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
+from aiogram.exceptions import TelegramRetryAfter
+
 from sqlalchemy import select, func
 
 from config import ADMIN_IDS
@@ -20,12 +23,26 @@ from database.db import (
 )
 from database.models import User, ContestApplication
 
+
 router = Router()
 
+
+# =========================================================
+# STATES
+# =========================================================
 
 class AdminReplyStates(StatesGroup):
     waiting_text = State()
 
+
+class BroadcastStates(StatesGroup):
+    waiting_message = State()
+    waiting_confirm = State()
+
+
+# =========================================================
+# HELPERS
+# =========================================================
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
@@ -54,6 +71,25 @@ def admin_application_keyboard(application_id: int):
     )
 
 
+def broadcast_confirm_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Ҳа, юбориш",
+                    callback_data="broadcast_confirm",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Бекор қилиш",
+                    callback_data="broadcast_cancel",
+                )
+            ],
+        ]
+    )
+
+
 def status_name(status: str) -> str:
     names = {
         "pending": "⏳ Кўриб чиқилмаган",
@@ -61,13 +97,22 @@ def status_name(status: str) -> str:
         "selected": "✅ Танланган",
         "rejected": "❌ Танланмаган",
     }
-    return names.get(status, status or "—")
+
+    return names.get(
+        status,
+        status or "—"
+    )
 
 
-async def send_chunks(message: Message, text: str, reply_markup=None):
+async def send_chunks(
+    message: Message,
+    text: str,
+    reply_markup=None,
+):
     limit = 3900
 
     if len(text) <= limit:
+
         await message.answer(
             text,
             reply_markup=reply_markup,
@@ -76,11 +121,20 @@ async def send_chunks(message: Message, text: str, reply_markup=None):
 
     parts = [
         text[i:i + limit]
-        for i in range(0, len(text), limit)
+        for i in range(
+            0,
+            len(text),
+            limit,
+        )
     ]
 
-    for i, part in enumerate(parts):
-        markup = reply_markup if i == len(parts) - 1 else None
+    for index, part in enumerate(parts):
+
+        markup = (
+            reply_markup
+            if index == len(parts) - 1
+            else None
+        )
 
         await message.answer(
             part,
@@ -88,32 +142,42 @@ async def send_chunks(message: Message, text: str, reply_markup=None):
         )
 
 
-# =========================
+# =========================================================
 # ADMIN MENU
-# =========================
+# =========================================================
 
 @router.message(Command("admin"))
 async def admin_help(message: Message):
+
     if not is_admin(message.from_user.id):
         return
 
     await message.answer(
-        "🛠 АДМИН КОМАНДАЛАР\n\n"
+        "🛠 АДМИН ПАНЕЛЬ\n\n"
+
+        "📊 МАЪЛУМОТЛАР\n"
         "/stats — умумий статистика\n"
         "/users — барча фойдаланувчилар\n"
-        "/applications — барча махсус танлов аризалари\n"
+        "/applications — махсус танлов аризалари\n"
         "/registered — Business Launch'га рўйхатдан ўтганлар\n"
-        "/selected — танланган аризалар\n"
-        "/cancel — жавоб ёзишни бекор қилиш"
+        "/selected — танланган иштирокчилар\n\n"
+
+        "📢 ОММАВИЙ ХАБАР\n"
+        "/broadcast — барча фойдаланувчиларга\n"
+        "/broadcast_registered — рўйхатдан ўтганларга\n"
+        "/broadcast_selected — танланганларга\n\n"
+
+        "/cancel — жорий амални бекор қилиш"
     )
 
 
-# =========================
-# STATISTIKA
-# =========================
+# =========================================================
+# STATS
+# =========================================================
 
 @router.message(Command("stats"))
 async def admin_stats(message: Message):
+
     if not is_admin(message.from_user.id):
         return
 
@@ -121,20 +185,27 @@ async def admin_stats(message: Message):
 
         users_count = (
             await session.execute(
-                select(func.count(User.id))
+                select(
+                    func.count(User.id)
+                )
             )
         ).scalar_one()
 
         applications_count = (
             await session.execute(
-                select(func.count(ContestApplication.id))
+                select(
+                    func.count(
+                        ContestApplication.id
+                    )
+                )
             )
         ).scalar_one()
 
         registered_count = (
             await session.execute(
-                select(func.count(User.id))
-                .where(
+                select(
+                    func.count(User.id)
+                ).where(
                     User.is_registered_for_launch.is_(True)
                 )
             )
@@ -142,8 +213,11 @@ async def admin_stats(message: Message):
 
         selected_count = (
             await session.execute(
-                select(func.count(ContestApplication.id))
-                .where(
+                select(
+                    func.count(
+                        ContestApplication.id
+                    )
+                ).where(
                     ContestApplication.status == "selected"
                 )
             )
@@ -151,6 +225,7 @@ async def admin_stats(message: Message):
 
     await message.answer(
         "📊 XJ BUSINESS LAUNCH СТАТИСТИКА\n\n"
+
         f"👥 Фойдаланувчилар: {users_count}\n"
         f"🎁 Махсус танлов аризалари: {applications_count}\n"
         f"✅ Business Launch'га рўйхатдан ўтганлар: {registered_count}\n"
@@ -158,12 +233,13 @@ async def admin_stats(message: Message):
     )
 
 
-# =========================
-# BARCHA USERLAR
-# =========================
+# =========================================================
+# USERS
+# =========================================================
 
 @router.message(Command("users"))
 async def admin_users(message: Message):
+
     if not is_admin(message.from_user.id):
         return
 
@@ -173,13 +249,14 @@ async def admin_users(message: Message):
             select(User)
             .order_by(
                 User.created_at.asc(),
-                User.id.asc()
+                User.id.asc(),
             )
         )
 
         users = result.scalars().all()
 
     if not users:
+
         await message.answer(
             "Ҳозирча фойдаланувчилар йўқ."
         )
@@ -189,7 +266,10 @@ async def admin_users(message: Message):
         f"👥 БАРЧА ФОЙДАЛАНУВЧИЛАР — {len(users)} та\n"
     ]
 
-    for i, user in enumerate(users, start=1):
+    for i, user in enumerate(
+        users,
+        start=1,
+    ):
 
         username = (
             f"@{user.telegram_username}"
@@ -198,7 +278,9 @@ async def admin_users(message: Message):
         )
 
         created = (
-            user.created_at.strftime("%d.%m.%Y %H:%M")
+            user.created_at.strftime(
+                "%d.%m.%Y %H:%M"
+            )
             if user.created_at
             else "—"
         )
@@ -214,16 +296,17 @@ async def admin_users(message: Message):
 
     await send_chunks(
         message,
-        "\n".join(lines)
+        "\n".join(lines),
     )
 
 
-# =========================
-# BUSINESS LAUNCH REGISTERED
-# =========================
+# =========================================================
+# REGISTERED USERS
+# =========================================================
 
 @router.message(Command("registered"))
 async def admin_registered(message: Message):
+
     if not is_admin(message.from_user.id):
         return
 
@@ -235,7 +318,6 @@ async def admin_registered(message: Message):
                 User.is_registered_for_launch.is_(True)
             )
             .order_by(
-                User.updated_at.asc(),
                 User.id.asc()
             )
         )
@@ -243,6 +325,7 @@ async def admin_registered(message: Message):
         users = result.scalars().all()
 
     if not users:
+
         await message.answer(
             "Business Launch'га рўйхатдан ўтганлар ҳозирча йўқ."
         )
@@ -252,7 +335,10 @@ async def admin_registered(message: Message):
         f"✅ BUSINESS LAUNCH'ГА РЎЙХАТДАН ЎТГАНЛАР — {len(users)} та\n"
     ]
 
-    for i, user in enumerate(users, start=1):
+    for i, user in enumerate(
+        users,
+        start=1,
+    ):
 
         username = (
             f"@{user.telegram_username}"
@@ -270,16 +356,17 @@ async def admin_registered(message: Message):
 
     await send_chunks(
         message,
-        "\n".join(lines)
+        "\n".join(lines),
     )
 
 
-# =========================
-# BARCHA ARIZALAR
-# =========================
+# =========================================================
+# APPLICATIONS
+# =========================================================
 
 @router.message(Command("applications"))
 async def admin_applications(message: Message):
+
     if not is_admin(message.from_user.id):
         return
 
@@ -288,21 +375,22 @@ async def admin_applications(message: Message):
         result = await session.execute(
             select(
                 ContestApplication,
-                User
+                User,
             )
             .join(
                 User,
-                ContestApplication.user_id == User.id
+                ContestApplication.user_id == User.id,
             )
             .order_by(
                 ContestApplication.created_at.asc(),
-                ContestApplication.id.asc()
+                ContestApplication.id.asc(),
             )
         )
 
         rows = result.all()
 
     if not rows:
+
         await message.answer(
             "Ҳозирча махсус танлов аризалари йўқ."
         )
@@ -321,7 +409,9 @@ async def admin_applications(message: Message):
         )
 
         created = (
-            app.created_at.strftime("%d.%m.%Y %H:%M")
+            app.created_at.strftime(
+                "%d.%m.%Y %H:%M"
+            )
             if app.created_at
             else "—"
         )
@@ -362,12 +452,13 @@ async def admin_applications(message: Message):
         )
 
 
-# =========================
-# TANLANGANLAR
-# =========================
+# =========================================================
+# SELECTED
+# =========================================================
 
 @router.message(Command("selected"))
 async def admin_selected(message: Message):
+
     if not is_admin(message.from_user.id):
         return
 
@@ -376,11 +467,11 @@ async def admin_selected(message: Message):
         result = await session.execute(
             select(
                 ContestApplication,
-                User
+                User,
             )
             .join(
                 User,
-                ContestApplication.user_id == User.id
+                ContestApplication.user_id == User.id,
             )
             .where(
                 ContestApplication.status == "selected"
@@ -393,6 +484,7 @@ async def admin_selected(message: Message):
         rows = result.all()
 
     if not rows:
+
         await message.answer(
             "Ҳозирча танланган аризалар йўқ."
         )
@@ -421,45 +513,360 @@ async def admin_selected(message: Message):
 
     await send_chunks(
         message,
-        "\n".join(lines)
+        "\n".join(lines),
     )
 
 
-# =========================
+# =========================================================
+# BROADCAST START
+# =========================================================
+
+async def start_broadcast(
+    message: Message,
+    state: FSMContext,
+    target: str,
+):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    await state.clear()
+
+    await state.set_state(
+        BroadcastStates.waiting_message
+    )
+
+    await state.update_data(
+        broadcast_target=target
+    )
+
+    target_names = {
+        "all": "барча фойдаланувчиларга",
+        "registered": "Business Launch'га рўйхатдан ўтганларга",
+        "selected": "танланган иштирокчиларга",
+    }
+
+    await message.answer(
+        "📢 ОММАВИЙ ХАБАР\n\n"
+        f"Қабул қилувчилар: {target_names[target]}\n\n"
+        "Энди юбориладиган хабарни ташланг.\n\n"
+        "Матн, расм, видео ёки файл юборишингиз мумкин.\n\n"
+        "Бекор қилиш учун /cancel"
+    )
+
+
+@router.message(Command("broadcast"))
+async def broadcast_all(
+    message: Message,
+    state: FSMContext,
+):
+
+    await start_broadcast(
+        message,
+        state,
+        "all",
+    )
+
+
+@router.message(Command("broadcast_registered"))
+async def broadcast_registered(
+    message: Message,
+    state: FSMContext,
+):
+
+    await start_broadcast(
+        message,
+        state,
+        "registered",
+    )
+
+
+@router.message(Command("broadcast_selected"))
+async def broadcast_selected(
+    message: Message,
+    state: FSMContext,
+):
+
+    await start_broadcast(
+        message,
+        state,
+        "selected",
+    )
+
+
+# =========================================================
+# BROADCAST MESSAGE RECEIVED
+# =========================================================
+
+@router.message(BroadcastStates.waiting_message)
+async def broadcast_get_message(
+    message: Message,
+    state: FSMContext,
+):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    if message.text == "/cancel":
+
+        await state.clear()
+
+        await message.answer(
+            "❌ Broadcast бекор қилинди."
+        )
+        return
+
+    data = await state.get_data()
+
+    target = data.get(
+        "broadcast_target"
+    )
+
+    await state.update_data(
+        source_chat_id=message.chat.id,
+        source_message_id=message.message_id,
+    )
+
+    await state.set_state(
+        BroadcastStates.waiting_confirm
+    )
+
+    target_names = {
+        "all": "барча фойдаланувчилар",
+        "registered": "рўйхатдан ўтганлар",
+        "selected": "танланганлар",
+    }
+
+    await message.answer(
+        "📢 Хабар қабул қилинди.\n\n"
+        f"Қабул қилувчилар: {target_names.get(target, target)}\n\n"
+        "Хабарни юборишни тасдиқлайсизми?",
+        reply_markup=broadcast_confirm_keyboard(),
+    )
+
+
+# =========================================================
+# BROADCAST CANCEL
+# =========================================================
+
+@router.callback_query(
+    F.data == "broadcast_cancel"
+)
+async def broadcast_cancel_callback(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+
+    if not is_admin(callback.from_user.id):
+        return
+
+    await state.clear()
+
+    await callback.answer(
+        "Бекор қилинди"
+    )
+
+    await callback.message.answer(
+        "❌ Broadcast бекор қилинди."
+    )
+
+
+# =========================================================
+# BROADCAST CONFIRM
+# =========================================================
+
+@router.callback_query(
+    BroadcastStates.waiting_confirm,
+    F.data == "broadcast_confirm",
+)
+async def broadcast_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+
+    if not is_admin(callback.from_user.id):
+        return
+
+    await callback.answer()
+
+    data = await state.get_data()
+
+    target = data.get(
+        "broadcast_target"
+    )
+
+    source_chat_id = data.get(
+        "source_chat_id"
+    )
+
+    source_message_id = data.get(
+        "source_message_id"
+    )
+
+    if not source_chat_id or not source_message_id:
+
+        await state.clear()
+
+        await callback.message.answer(
+            "❌ Хабар маълумоти топилмади."
+        )
+        return
+
+    async with SessionLocal() as session:
+
+        # BARChA
+        if target == "all":
+
+            result = await session.execute(
+                select(
+                    User.telegram_id
+                )
+            )
+
+        # REGISTERED
+        elif target == "registered":
+
+            result = await session.execute(
+                select(
+                    User.telegram_id
+                )
+                .where(
+                    User.is_registered_for_launch.is_(True)
+                )
+            )
+
+        # SELECTED
+        elif target == "selected":
+
+            result = await session.execute(
+                select(
+                    User.telegram_id
+                )
+                .join(
+                    ContestApplication,
+                    ContestApplication.user_id == User.id,
+                )
+                .where(
+                    ContestApplication.status == "selected"
+                )
+                .distinct()
+            )
+
+        else:
+
+            await state.clear()
+
+            await callback.message.answer(
+                "❌ Broadcast тури топилмади."
+            )
+            return
+
+        telegram_ids = list(
+            result.scalars().all()
+        )
+
+    if not telegram_ids:
+
+        await state.clear()
+
+        await callback.message.answer(
+            "❌ Юбориш учун фойдаланувчилар топилмади."
+        )
+        return
+
+    await callback.message.answer(
+        f"📤 Хабар {len(telegram_ids)} нафар фойдаланувчига юборилмоқда..."
+    )
+
+    success = 0
+    failed = 0
+
+    for telegram_id in telegram_ids:
+
+        try:
+
+            await callback.bot.copy_message(
+                chat_id=telegram_id,
+                from_chat_id=source_chat_id,
+                message_id=source_message_id,
+            )
+
+            success += 1
+
+            # Telegram лимитига урилмаслик учун
+            await asyncio.sleep(0.05)
+
+        except TelegramRetryAfter as e:
+
+            await asyncio.sleep(
+                e.retry_after + 1
+            )
+
+            try:
+
+                await callback.bot.copy_message(
+                    chat_id=telegram_id,
+                    from_chat_id=source_chat_id,
+                    message_id=source_message_id,
+                )
+
+                success += 1
+
+            except Exception:
+
+                failed += 1
+
+        except Exception:
+
+            failed += 1
+
+    await state.clear()
+
+    await callback.message.answer(
+        "✅ BROADCAST ЯКУНЛАНДИ\n\n"
+        f"👥 Жами: {len(telegram_ids)}\n"
+        f"✅ Юборилди: {success}\n"
+        f"❌ Юборилмади: {failed}"
+    )
+
+
+# =========================================================
 # CANCEL
-# =========================
+# =========================================================
 
 @router.message(Command("cancel"))
-async def admin_reply_cancel(
+async def cancel_admin_action(
     message: Message,
-    state: FSMContext
+    state: FSMContext,
 ):
+
     if not is_admin(message.from_user.id):
         return
 
     await state.clear()
 
     await message.answer(
-        "Жавоб ёзиш бекор қилинди."
+        "❌ Амал бекор қилинди."
     )
 
 
-# =========================
-# ADMIN REPLY BUTTON
-# =========================
+# =========================================================
+# ADMIN REPLY START
+# =========================================================
 
 @router.callback_query(
     F.data.startswith("admin_reply:")
 )
 async def admin_reply_start(
     callback: CallbackQuery,
-    state: FSMContext
+    state: FSMContext,
 ):
+
     if not is_admin(callback.from_user.id):
 
         await callback.answer(
             "Рухсат йўқ.",
-            show_alert=True
+            show_alert=True,
         )
         return
 
@@ -496,9 +903,9 @@ async def admin_reply_start(
     )
 
 
-# =========================
-# TANLANDI
-# =========================
+# =========================================================
+# SELECT APPLICATION
+# =========================================================
 
 @router.callback_query(
     F.data.startswith("admin_select:")
@@ -506,11 +913,12 @@ async def admin_reply_start(
 async def admin_select(
     callback: CallbackQuery
 ):
+
     if not is_admin(callback.from_user.id):
 
         await callback.answer(
             "Рухсат йўқ.",
-            show_alert=True
+            show_alert=True,
         )
         return
 
@@ -526,13 +934,13 @@ async def admin_select(
 
         await callback.answer(
             "Ариза топилмади.",
-            show_alert=True
+            show_alert=True,
         )
         return
 
     await set_application_status(
         application_id,
-        "selected"
+        "selected",
     )
 
     try:
@@ -557,7 +965,7 @@ async def admin_select(
     except Exception as e:
 
         send_status = (
-            f"Фойдаланувчига хабар юборилмади: {e}"
+            f"Хабар юборилмади: {e}"
         )
 
     await callback.answer(
@@ -572,9 +980,9 @@ async def admin_select(
     )
 
 
-# =========================
-# TANLANMADI
-# =========================
+# =========================================================
+# REJECT APPLICATION
+# =========================================================
 
 @router.callback_query(
     F.data.startswith("admin_reject:")
@@ -582,11 +990,12 @@ async def admin_select(
 async def admin_reject(
     callback: CallbackQuery
 ):
+
     if not is_admin(callback.from_user.id):
 
         await callback.answer(
             "Рухсат йўқ.",
-            show_alert=True
+            show_alert=True,
         )
         return
 
@@ -602,13 +1011,13 @@ async def admin_reject(
 
         await callback.answer(
             "Ариза топилмади.",
-            show_alert=True
+            show_alert=True,
         )
         return
 
     await set_application_status(
         application_id,
-        "rejected"
+        "rejected",
     )
 
     try:
@@ -635,7 +1044,7 @@ async def admin_reject(
     except Exception as e:
 
         send_status = (
-            f"Фойдаланувчига хабар юборилмади: {e}"
+            f"Хабар юборилмади: {e}"
         )
 
     await callback.answer(
@@ -650,18 +1059,19 @@ async def admin_reject(
     )
 
 
-# =========================
-# ADMINNING YOZGAN JAVOBI
-# =========================
+# =========================================================
+# ADMIN REPLY SEND
+# =========================================================
 
 @router.message(
     AdminReplyStates.waiting_text,
-    F.text
+    F.text,
 )
 async def admin_reply_send(
     message: Message,
-    state: FSMContext
+    state: FSMContext,
 ):
+
     if not is_admin(message.from_user.id):
         return
 
@@ -680,8 +1090,7 @@ async def admin_reply_send(
         await state.clear()
 
         await message.answer(
-            "Ариза маълумоти топилмади. "
-            "Қайта уриниб кўринг."
+            "Ариза маълумоти топилмади."
         )
         return
 
